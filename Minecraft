@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BlockCraft — simple Minecraft‑style sandbox</title>
+  <style>
+    :root{
+      --bg:#0b1220; --panel:#0f172a; --text:#e5e7eb; --muted:#9ca3af; --accent:#38bdf8;
+    }
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#0b1220,#0b1220 60%,#0a0f1a);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    .wrap{display:grid;grid-template-rows:auto 1fr auto;max-width:1100px;margin:0 auto;height:100%;gap:12px;padding:12px}
+    header{display:flex;align-items:center;justify-content:space-between;background:var(--panel);padding:10px 14px;border-radius:16px;box-shadow:0 10px 25px rgba(0,0,0,.25)}
+    header h1{font-size:18px;margin:0;letter-spacing:.3px}
+    header .btns{display:flex;gap:8px;flex-wrap:wrap}
+    button, select{background:#111827;color:var(--text);border:1px solid #1f2937;border-radius:12px;padding:8px 12px;cursor:pointer}
+    button:hover{border-color:#374151}
+    button:active{transform:translateY(1px)}
+    .hotbar{display:flex;gap:8px;background:var(--panel);padding:10px;border-radius:16px;align-items:center;flex-wrap:wrap}
+    .slot{display:flex;align-items:center;gap:6px;padding:8px 10px;border:2px solid #1f2937;border-radius:12px;min-width:90px;user-select:none}
+    .slot.active{border-color:var(--accent);box-shadow:0 0 0 2px rgba(56,189,248,.15) inset}
+    .swatch{width:18px;height:18px;border-radius:4px;border:1px solid rgba(255,255,255,.25)}
+    .panel{background:var(--panel);border-radius:16px;display:grid;grid-template-columns:1fr 260px;gap:12px;box-shadow:0 10px 25px rgba(0,0,0,.25)}
+    .right{padding:12px;display:flex;flex-direction:column;gap:10px}
+    .right .card{background:#0b1328;border:1px solid #172036;border-radius:12px;padding:12px}
+    .right h3{margin:0 0 6px 0;font-size:14px;text-transform:uppercase;letter-spacing:.12em;color:#93c5fd}
+    #game{display:block;width:100%;height:100%;background:#6ec4ff;border-radius:16px}
+    footer{opacity:.8;font-size:12px;text-align:center}
+    .kbd{background:#111827;border:1px solid #374151;border-bottom-width:3px;border-radius:6px;padding:0 6px;margin:0 1px}
+    @media (max-width: 900px){
+      .panel{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>🧱 BlockCraft — simple Minecraft‑style sandbox</h1>
+      <div class="btns">
+        <button id="btnSave">Save</button>
+        <button id="btnLoad">Load</button>
+        <button id="btnNew">New World</button>
+        <button id="btnFullscreen">Fullscreen</button>
+        <select id="zoom">
+          <option value="32">Zoom: 32px</option>
+          <option value="24">Zoom: 24px</option>
+          <option value="20">Zoom: 20px</option>
+          <option value="16">Zoom: 16px</option>
+        </select>
+      </div>
+    </header>
+
+    <div class="hotbar" id="hotbar"></div>
+
+    <div class="panel">
+      <canvas id="game" width="1024" height="640"></canvas>
+      <aside class="right">
+        <div class="card">
+          <h3>Controls</h3>
+          <div style="font-size:14px;line-height:1.5">
+            Move camera: <span class="kbd">W</span><span class="kbd">A</span><span class="kbd">S</span><span class="kbd">D</span> or arrow keys<br>
+            Break block: Left‑click<br>
+            Place block: Right‑click or <span class="kbd">Ctrl</span>+Click<br>
+            Select block: Keys <span class="kbd">1..6</span> or click hotbar<br>
+            Quick fill line: Hold <span class="kbd">Shift</span> while placing<br>
+            Save/Load happens auto every 15s too
+          </div>
+        </div>
+        <div class="card">
+          <h3>About</h3>
+          <p style="font-size:14px;opacity:.9">This is a tiny 2D sandbox inspired by Minecraft. Place/break blocks, pan the camera, and the world saves to your browser. Single‑file app (HTML+JS+CSS) so it’s easy to host on GitHub Pages, Replit, or any static host.</p>
+        </div>
+        <div class="card">
+          <h3>Tips</h3>
+          <ul style="margin:0 0 0 18px;font-size:14px;opacity:.95;line-height:1.5">
+            <li>On Chromebooks without right‑click, use <b>Ctrl+Click</b> to place.</li>
+            <li>Use “New World” to regenerate terrain.</li>
+            <li>Try different zoom levels for performance.</li>
+          </ul>
+        </div>
+      </aside>
+    </div>
+
+    <footer>Made for learning. Not affiliated with Mojang. Uses browser LocalStorage only.</footer>
+  </div>
+
+<script>
+// ======= CONFIG =======
+const WORLD_W = 160;  // tiles wide
+const WORLD_H = 96;   // tiles tall
+const SKY_COLOR = '#6ec4ff';
+
+// Block IDs
+const AIR=0, GRASS=1, DIRT=2, STONE=3, SAND=4, WOOD=5, LEAF=6, WATER=7;
+// Palette + names
+const BLOCKS = {
+  [AIR]:  {name:'Air',  color:'transparent', solid:false},
+  [GRASS]:{name:'Grass',color:'#3cb043',     solid:true},
+  [DIRT]: {name:'Dirt', color:'#7a5230',     solid:true},
+  [STONE]:{name:'Stone',color:'#7d8b8f',     solid:true},
+  [SAND]: {name:'Sand', color:'#e6d18a',     solid:true},
+  [WOOD]: {name:'Wood', color:'#8b5a2b',     solid:true},
+  [LEAF]: {name:'Leaves',color:'#2e8b57',    solid:true},
+  [WATER]:{name:'Water',color:'rgba(80,180,255,0.6)', solid:false}
+};
+
+const HOTBAR = [GRASS,DIRT,STONE,SAND,WOOD,LEAF];
+let selected = HOTBAR[0];
+
+// ======= WORLD =======
+let world = createWorld();
+function createWorld(seed=Math.random()*1e9|0){
+  // Simple terrain: perlin‑like 1D noise via layered random walk
+  const hmap = new Array(WORLD_W);
+  let h = Math.floor(WORLD_H*0.5);
+  let rng = mulberry32(seed);
+  for(let x=0;x<WORLD_W;x++){
+    // random walk with smoothing
+    h += (rng()-0.5)*2;
+    h += (rng()-0.5);
+    h = clamp(Math.round(h), Math.floor(WORLD_H*0.35), Math.floor(WORLD_H*0.75));
+    hmap[x]=h;
+  }
+  // build tiles: stone deep, dirt, grass top, sand near water
+  const tiles = new Uint8Array(WORLD_W*WORLD_H);
+  const sea = Math.floor(WORLD_H*0.62);
+  for(let x=0;x<WORLD_W;x++){
+    for(let y=0;y<WORLD_H;y++){
+      const i = idx(x,y);
+      if (y<hmap[x]-4) tiles[i]=STONE;
+      else if (y<hmap[x]-1) tiles[i]=DIRT;
+      else if (y===hmap[x]) tiles[i]=GRASS;
+      else if (y>hmap[x]) tiles[i]= (y>=sea? WATER : AIR);
+    }
+    // beaches
+    for(let y=hmap[x]-1; y<=hmap[x]+2 && y<WORLD_H; y++){
+      if (y>=0 && y>=sea-1 && tiles[idx(x,y)]!==AIR) tiles[idx(x,y)] = SAND;
+    }
+    // simple trees occasionally
+    if (Math.random()<0.08){
+      const ground = hmap[x];
+      if (tiles[idx(x,ground)]===GRASS){
+        const tH = 3 + (Math.random()*3|0);
+        for(let t=1;t<=tH;t++) if (inWorld(x,ground-t)) tiles[idx(x,ground-t)] = WOOD;
+        for(let dx=-2; dx<=2; dx++){
+          for(let dy=-2; dy<=1; dy++){
+            if (Math.abs(dx)+Math.abs(dy) <=3){
+              if (inWorld(x+dx, ground-(tH+dy))) tiles[idx(x+dx, ground-(tH+dy))]=LEAF;
+            }
+          }
+        }
+      }
+    }
+  }
+  return {tiles, seed};
+}
+
+function idx(x,y){return y*WORLD_W + x}
+function inWorld(x,y){return x>=0&&x<WORLD_W&&y>=0&&y<WORLD_H}
+function clamp(v,a,b){return v<a?a:(v>b?b:v)}
+function mulberry32(a){return function(){var t=a+=0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return ((t^t>>>14)>>>0)/4294967296}}
+
+// ======= RENDER =======
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let tileSize = 32;
+let camX = 0, camY = 0; // in tiles
+let mouseTile = {x:0,y:0};
+
+function draw(){
+  // sky
+  ctx.fillStyle = SKY_COLOR;
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  const viewW = Math.ceil(canvas.width/tileSize)+2;
+  const viewH = Math.ceil(canvas.height/tileSize)+2;
+  for(let vx=0; vx<viewW; vx++){
+    for(let vy=0; vy<viewH; vy++){
+      const wx = vx + Math.floor(camX);
+      const wy = vy + Math.floor(camY);
+      if(!inWorld(wx,wy)) continue;
+      const b = world.tiles[idx(wx,wy)];
+      if (b===AIR) continue;
+      ctx.fillStyle = BLOCKS[b].color;
+      ctx.fillRect(Math.floor(vx*tileSize - (camX%1)*tileSize), Math.floor(vy*tileSize - (camY%1)*tileSize), tileSize, tileSize);
+      // tiny shading
+      ctx.fillStyle = 'rgba(0,0,0,0.08)';
+      ctx.fillRect(Math.floor(vx*tileSize - (camX%1)*tileSize), Math.floor(vy*tileSize - (camY%1)*tileSize), tileSize, 2);
+      ctx.fillRect(Math.floor(vx*tileSize - (camX%1)*tileSize), Math.floor(vy*tileSize - (camY%1)*tileSize)+tileSize-2, tileSize, 2);
+    }
+  }
+  // highlight tile under cursor
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 2;
+  const hx = Math.floor((mouseTile.x - camX)*tileSize);
+  const hy = Math.floor((mouseTile.y - camY)*tileSize);
+  ctx.strokeRect(hx, hy, tileSize, tileSize);
+}
+
+function screenToTile(px,py){
+  return {x: Math.floor(px/tileSize + camX), y: Math.floor(py/tileSize + camY)}
+}
+
+// ======= INPUT =======
+let keys = {};
+window.addEventListener('keydown', e=>{keys[e.key]=true; hotbarKey(e);});
+window.addEventListener('keyup', e=>{keys[e.key]=false});
+canvas.addEventListener('mousemove', e=>{const r=canvas.getBoundingClientRect();mouseTile=screenToTile(e.clientX-r.left, e.clientY-r.top)});
+canvas.addEventListener('mousedown', onMouse);
+canvas.addEventListener('contextmenu', e=>e.preventDefault());
+canvas.addEventListener('touchstart', onTouch, {passive:false});
+canvas.addEventListener('touchmove', onTouch, {passive:false});
+
+function onMouse(e){
+  const place = (e.button===2) || (e.ctrlKey && e.button===0);
+  actAt(mouseTile.x, mouseTile.y, place, e.shiftKey);
+}
+function onTouch(e){
+  e.preventDefault();
+  const t = e.touches[0]; if(!t) return;
+  const r = canvas.getBoundingClientRect();
+  const p = screenToTile(t.clientX-r.left, t.clientY-r.top);
+  // tap = place, long press = break (simplified)
+  actAt(p.x, p.y, true, false);
+}
+
+function actAt(tx,ty, place, line){
+  if(!inWorld(tx,ty)) return;
+  if(place){
+    if(world.tiles[idx(tx,ty)]!==AIR && world.tiles[idx(tx,ty)]!==WATER) return; // occupy air/water only
+    const drawLine = line ? 8 : 1;
+    for(let i=0;i<drawLine;i++){
+      const x = tx+i;
+      if(inWorld(x,ty)) world.tiles[idx(x,ty)] = selected;
+    }
+  }else{
+    world.tiles[idx(tx,ty)] = AIR;
+  }
+  scheduleSave();
+}
+
+function hotbarKey(e){
+  if(e.key>='1' && e.key<='9'){
+    const idxNum = parseInt(e.key,10)-1;
+    if (idxNum < HOTBAR.length){ selected = HOTBAR[idxNum]; updateHotbar(); }
+  }
+}
+
+// camera and loop
+function update(){
+  const spd = 0.18*(32/tileSize);
+  if(keys['w']||keys['W']||keys['ArrowUp']) camY -= spd;
+  if(keys['s']||keys['S']||keys['ArrowDown']) camY += spd;
+  if(keys['a']||keys['A']||keys['ArrowLeft']) camX -= spd;
+  if(keys['d']||keys['D']||keys['ArrowRight']) camX += spd;
+  camX = clamp(camX, 0, WORLD_W - canvas.width/tileSize);
+  camY = clamp(camY, 0, WORLD_H - canvas.height/tileSize);
+  draw();
+  requestAnimationFrame(update);
+}
+
+// ======= UI =======
+const hotbar = document.getElementById('hotbar');
+function updateHotbar(){
+  hotbar.innerHTML='';
+  HOTBAR.forEach((b,i)=>{
+    const el = document.createElement('div');
+    el.className = 'slot'+(selected===b?' active':'');
+    el.innerHTML = `<div class="swatch" style="background:${BLOCKS[b].color}"></div><div>${i+1}. ${BLOCKS[b].name}</div>`;
+    el.onclick = ()=>{selected=b; updateHotbar();};
+    hotbar.appendChild(el);
+  })
+}
+updateHotbar();
+
+// header controls
+const btnSave=document.getElementById('btnSave');
+const btnLoad=document.getElementById('btnLoad');
+const btnNew=document.getElementById('btnNew');
+const btnFS=document.getElementById('btnFullscreen');
+const zoomSel=document.getElementById('zoom');
+btnSave.onclick = saveWorld;
+btnLoad.onclick = ()=>{loadWorld();};
+btnNew.onclick = ()=>{world=createWorld(); camX=camY=0; scheduleSave();};
+btnFS.onclick = ()=>{if(canvas.requestFullscreen) canvas.requestFullscreen();};
+zoomSel.onchange = ()=>{tileSize=parseInt(zoomSel.value,10);};
+
+// ======= SAVE/LOAD =======
+const SAVE_KEY = 'blockcraft_world_v1';
+let saveTimer = null;
+function scheduleSave(){
+  if(saveTimer) return;
+  saveTimer = setTimeout(()=>{saveWorld(); saveTimer=null;}, 2000);
+}
+function saveWorld(){
+  try{
+    const data = {w:WORLD_W,h:WORLD_H, tiles:Array.from(world.tiles), seed:world.seed};
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    flash('World saved');
+  }catch(err){ flash('Save failed (storage full?)'); }
+}
+function loadWorld(){
+  const j = localStorage.getItem(SAVE_KEY);
+  if(!j){ flash('No save found'); return; }
+  const data = JSON.parse(j);
+  if(data.w!==WORLD_W || data.h!==WORLD_H){ flash('Save size mismatch'); return; }
+  world = {tiles:new Uint8Array(data.tiles), seed:data.seed};
+  flash('World loaded');
+}
+setInterval(saveWorld, 15000); // autosave every 15s
+
+// tiny toast
+let toast=null, toastTimer=null;
+function flash(msg){
+  if(!toast){ toast=document.createElement('div'); document.body.appendChild(toast); }
+  toast.textContent=msg;
+  Object.assign(toast.style,{position:'fixed',left:'50%',bottom:'22px',transform:'translateX(-50%)',background:'#111827',color:'#e5e7eb',padding:'10px 14px',border:'1px solid #374151',borderRadius:'10px',boxShadow:'0 10px 25px rgba(0,0,0,.35)',zIndex:9999});
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>toast.remove(), 1400);
+}
+
+// ======= START =======
+function fitCanvas(){
+  const r = document.querySelector('.panel');
+  const w = r.clientWidth - 260 - 16; // minus sidebar and gap
+  const h = r.clientHeight - 0;
+  canvas.width = Math.max(640, Math.floor(w));
+  canvas.height = Math.max(360, Math.floor(h));
+}
+window.addEventListener('resize', fitCanvas);
+fitCanvas();
+update();
+</script>
+</body>
+</html>
